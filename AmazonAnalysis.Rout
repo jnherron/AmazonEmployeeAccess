@@ -1,0 +1,145 @@
+
+R version 4.5.1 (2025-06-13) -- "Great Square Root"
+Copyright (C) 2025 The R Foundation for Statistical Computing
+Platform: x86_64-pc-linux-gnu
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> library(vroom)
+> #library(DataExplorer)
+> library(dplyr)
+
+Attaching package: ‘dplyr’
+
+The following objects are masked from ‘package:stats’:
+
+    filter, lag
+
+The following objects are masked from ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+> library(tidymodels)
+── Attaching packages ────────────────────────────────────── tidymodels 1.4.1 ──
+✔ broom        1.0.10     ✔ rsample      1.3.1 
+✔ dials        1.4.2      ✔ tailor       0.1.0 
+✔ ggplot2      3.5.2      ✔ tidyr        1.3.1 
+✔ infer        1.0.9      ✔ tune         2.0.0 
+✔ modeldata    1.5.1      ✔ workflows    1.3.0 
+✔ parsnip      1.3.3      ✔ workflowsets 1.1.1 
+✔ purrr        1.1.0      ✔ yardstick    1.3.2 
+✔ recipes      1.3.1      
+── Conflicts ───────────────────────────────────────── tidymodels_conflicts() ──
+✖ purrr::discard()  masks scales::discard()
+✖ dplyr::filter()   masks stats::filter()
+✖ dplyr::lag()      masks stats::lag()
+✖ yardstick::spec() masks vroom::spec()
+✖ recipes::step()   masks stats::step()
+> 
+> 
+> 
+> 
+> # Upload Data ------------------------------------------------------------------
+> train_data <- vroom("train.csv")
+Rows: 32769 Columns: 10
+── Column specification ────────────────────────────────────────────────────────
+Delimiter: ","
+dbl (10): ACTION, RESOURCE, MGR_ID, ROLE_ROLLUP_1, ROLE_ROLLUP_2, ROLE_DEPTN...
+
+ℹ Use `spec()` to retrieve the full column specification for this data.
+ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+> test_data <- vroom("test.csv")
+Rows: 58921 Columns: 10
+── Column specification ────────────────────────────────────────────────────────
+Delimiter: ","
+dbl (10): id, RESOURCE, MGR_ID, ROLE_ROLLUP_1, ROLE_ROLLUP_2, ROLE_DEPTNAME,...
+
+ℹ Use `spec()` to retrieve the full column specification for this data.
+ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+> 
+> # EDA --------------------------------------------------------------------------
+> # DataExplorer::plot_intro(train_data)         # Need to change continuous variable to discrete
+> # DataExplorer::plot_correlation(train_data)
+> # DataExplorer::plot_missing(train_data)       # None!!!! :)
+> 
+> 
+> # Recipe -----------------------------------------------------------------------
+> train_data$ACTION <- as.factor(train_data$ACTION)
+> 
+> my_recipe <- recipe(ACTION~., data=train_data) %>%
++   step_mutate_at(all_numeric_predictors(), fn=factor) %>%
++   step_other(all_nominal_predictors(), threshold = .001) %>%
++   step_dummy(all_nominal_predictors())
+> 
+> # apply the recipe to your data1
+> prep <- prep(my_recipe)
+> baked <- bake(prep, new_data = train_data)
+> 
+> 
+> 
+> # Logistic Regression ----------------------------------------------------------
+> # logreg_mod <- logistic_reg() %>%
+> #   set_engine("glm")
+> # 
+> # # Put into a workflow
+> # logreg_wf <- workflow() %>%
+> #   add_recipe(my_recipe) %>%
+> #   add_model(logreg_mod) %>%
+> #   fit(data=train_data)
+> # 
+> # # Make Predictions
+> # logreg_preds <- predict(logreg_wf, new_data=test_data, type="prob")
+> # 
+> # # Format for Kaggle
+> # kag_sub <- data.frame(id = test_data$id,
+> #                       ACTION = logreg_preds$.pred_1)
+> # vroom_write(x=kag_sub, file="./LogregPreds.csv", delim=",")
+> # 
+> 
+> # Pentalized Logistic Regression -----------------------------------------------
+> p_logreg_mod <- logistic_reg(mixture=tune(), penalty=tune()) %>%
++   set_engine("glmnet")
+> 
+> p_logreg_wf <- workflow() %>%
++   add_recipe(my_recipe) %>%
++   add_model(p_logreg_mod)
+> 
+> tuning_grid <- grid_regular(penalty(), mixture(), levels = 3)
+> folds <- vfold_cv(train_data, v = 5, repeats=1)
+> 
+> cv_results <- p_logreg_wf %>%
++   tune_grid(resamples=folds, grid=tuning_grid, metrics=metric_set(roc_auc))
+> best_tune <- cv_results %>%
++   select_best(metric="roc_auc")
+> final_wf <- p_logreg_wf %>%
++   finalize_workflow(best_tune) %>%
++   fit(data=train_data)
+> 
+> # Make Predictions
+> p_logreg_preds <- predict(final_wf, new_data=test_data, type="prob")
+> 
+> # Format for Kaggle
+> kag_sub <- data.frame(id = test_data$id,
++                       ACTION = p_logreg_preds$.pred_1)
+> vroom_write(x=kag_sub, file="./PLogregPreds_u02.csv", delim=",")
+> 
+> 
+> 
+> 
+> 
+> 
+> proc.time()
+    user   system  elapsed 
+1243.156   16.459 1257.898 

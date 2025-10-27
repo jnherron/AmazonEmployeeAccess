@@ -6,3 +6,8 @@ AmazonAnalysis.R
 - Basic EDA
 - Feature engineering / creates recipe
 - Performs Logistic Regression
+- Performs Pentalized Logistic Regression
+- Random Forest
+- KNN Model
+- Naive Bayes
+- Neural Network
