@@ -3,8 +3,11 @@ library(vroom)
 library(dplyr)
 library(tidymodels)
 library(discrim)
+library(embed)
 library(keras)
 library(reticulate)
+library(kernlab)
+library(themis)
 # py_require_legacy_keras()
 # py_require("tensorflow")
 
@@ -28,13 +31,19 @@ train_data$ACTION <- as.factor(train_data$ACTION)
 my_recipe <- recipe(ACTION~., data=train_data) %>%
   step_mutate_at(all_numeric_predictors(), fn=factor) %>%
   step_other(all_nominal_predictors(), threshold = .001) %>%
-  step_dummy(all_nominal_predictors()) %>%
-  step_normalize(all_predictors()) %>%
-  step_pca(all_predictors(), threshold=.25)
+  #step_dummy(all_nominal_predictors()) %>%
+  step_lencode_mixed(all_nominal_predictors(), outcome = vars(ACTION)) %>%
+  #step_smote(all_outcomes(), neighbors=3) %>%
+  step_upsample(all_outcomes())
+  #step_downsample(all_outcomes())
+  #step_normalize(all_predictors())
+  #step_pca(all_predictors(), threshold=.32)
 
-# apply the recipe to your data1
-prep <- prep(my_recipe)
-baked <- bake(prep, new_data = train_data)
+
+
+# # apply the recipe to your data1
+# prep <- prep(my_recipe)
+# baked <- bake(prep, new_data = train_data)
 
 # Logistic Regression ----------------------------------------------------------
 
@@ -53,7 +62,7 @@ baked <- bake(prep, new_data = train_data)
 # # Format for Kaggle
 # kag_sub <- data.frame(id = test_data$id,
 #                       ACTION = logreg_preds$.pred_1)
-# vroom_write(x=kag_sub, file="./LogregPreds_pcd2.csv", delim=",")
+# vroom_write(x=kag_sub, file="./LogregPreds_smote.csv", delim=",")
 
 
 # Pentalized Logistic Regression -----------------------------------------------
@@ -87,37 +96,48 @@ baked <- bake(prep, new_data = train_data)
 
 # Random Forest ----------------------------------------------------------------
 
-forest_mod <- rand_forest(mtry = tune(), min_n=tune(), trees=500) %>%
+# forest_mod <- rand_forest(mtry = tune(), min_n=tune(), trees=500) %>%
+#   set_engine("ranger") %>%
+#   set_mode("classification")
+
+forest_mod <- rand_forest(mtry = 1, min_n=10, trees=1500) %>%
   set_engine("ranger") %>%
   set_mode("classification")
 
-# Create a workflow with model & recipe
+# # Create a workflow with model & recipe
+# forest_wf <- workflow() %>%
+#   add_recipe(my_recipe) %>%
+#   add_model(forest_mod)
+
 forest_wf <- workflow() %>%
   add_recipe(my_recipe) %>%
-  add_model(forest_mod)
-
-# Set up grid of tuning values and K-fold
-tuning_grid <- grid_regular(mtry(range=c(1,10)), min_n(), levels=3)
-folds <- vfold_cv(train_data, v = 5, repeats=1)
-
-# Find best tuning parameters
-cv_results <- forest_wf %>%
-  tune_grid(resamples=folds, grid=tuning_grid, metrics=metric_set(roc_auc))
-best_tune <- cv_results %>%
-  select_best(metric="roc_auc")
-
-# Finalize workflow and predict
-final_wf <- forest_wf %>%
-  finalize_workflow(best_tune) %>%
+  add_model(forest_mod)%>%
   fit(data=train_data)
 
+# # Set up grid of tuning values and K-fold
+# #tuning_grid <- grid_regular(mtry(range=c(1,9)), min_n(), levels=3)
+# tuning_grid <- grid_regular(mtry(range = c(1, 9)), min_n(range = c(1, 10)), levels = 5)
+
+# folds <- vfold_cv(train_data, v = 5, repeats=1)
+# 
+# # Find best tuning parameters
+# cv_results <- forest_wf %>%
+#   tune_grid(resamples=folds, grid=tuning_grid, metrics=metric_set(roc_auc))
+# best_tune <- cv_results %>%
+#   select_best(metric="roc_auc")
+# 
+# # Finalize workflow and predict
+# final_wf <- forest_wf %>%
+#   finalize_workflow(best_tune) %>%
+#   fit(data=train_data)
+
 # Make Predictions
-forest_preds <- predict(final_wf, new_data=test_data, type="prob")
+forest_preds <- predict(forest_wf, new_data=test_data, type="prob")
 
 # Format for Kaggle
 kag_sub <- data.frame(id = test_data$id,
                       ACTION = forest_preds$.pred_1)
-vroom_write(x=kag_sub, file="./Forest_pcd25.csv", delim=",")
+vroom_write(x=kag_sub, file="./Forest_matt.csv", delim=",")
 
 
 # KNN Model --------------------------------------------------------------------
@@ -232,6 +252,67 @@ vroom_write(x=kag_sub, file="./Forest_pcd25.csv", delim=",")
 #                       ACTION = nb_preds$.pred_1)
 # vroom_write(x=kag_sub, file="./NnPreds.csv", delim=",")
 # 
+
+
+# SVN Poly ---------------------------------------------------------------------
+
+# svm_poly_mod <- svm_poly(degree=1, cost=.0131) %>%
+#   set_mode("classification") %>%
+#   set_engine("kernlab")
+# 
+# svm_poly_wf <- workflow() %>%
+#   add_recipe(my_recipe) %>%
+#   add_model(svm_poly_mod) %>%
+#   fit(data=train_data)
+# 
+# # Make Predictions
+# svm_poly_preds <- predict(svm_poly_wf, new_data=test_data, type="prob")
+# 
+# # Format for Kaggle
+# kag_sub <- data.frame(id = test_data$id,
+#                       ACTION = svm_poly_preds$.pred_1)
+# vroom_write(x=kag_sub, file="./SvmPolyPreds.csv", delim=",")
+
+# SVN Radial -------------------------------------------------------------------
+
+# svm_radial_mod <- svm_rbf(rbf_sigma=.177, cost=.00316) %>%
+#   set_mode("classification") %>%
+#   set_engine("kernlab")
+# 
+# svm_radial_wf <- workflow() %>%
+#   add_recipe(my_recipe) %>%
+#   add_model(svm_radial_mod) %>%
+#   fit(data=train_data)
+# 
+# # Make Predictions
+# svm_radial_preds <- predict(svm_radial_wf, new_data=test_data, type="prob")
+# 
+# # Format for Kaggle
+# kag_sub <- data.frame(id = test_data$id,
+#                       ACTION = svm_radial_preds$.pred_1)
+# vroom_write(x=kag_sub, file="./SvmRadialPreds.csv", delim=",")
+
+# SVN Linear -------------------------------------------------------------------
+
+# svm_linear_mod <- svm_linear(cost=.0131) %>%
+#   set_mode("classification") %>%
+#   set_engine("kernlab")
+# 
+# svm_linear_wf <- workflow() %>%
+#   add_recipe(my_recipe) %>%
+#   add_model(svm_linear_mod) %>%
+#   fit(data=train_data)
+# 
+# # Make Predictions
+# svm_linear_preds <- predict(svm_linear_wf, new_data=test_data, type="prob")
+# 
+# # Format for Kaggle
+# kag_sub <- data.frame(id = test_data$id,
+#                       ACTION = svm_linear_preds$.pred_1)
+# vroom_write(x=kag_sub, file="./SvmLinearPreds.csv", delim=",")
+
+
+
 
 
 
